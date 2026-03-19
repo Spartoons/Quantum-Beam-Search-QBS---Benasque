@@ -8,6 +8,27 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    
+    <style>
+        /* Leaflet override to remove default white square */
+        .clear-background { background: none; border: none; } 
+        
+        /* The beautiful circular icon wrapper from your snippet */
+        .custom-icon-wrapper {
+            display: flex; align-items: center; justify-content: center;
+            background: white; border-radius: 50%; border: 2px solid #2c3e50;
+            width: 26px; height: 26px; /* Fixed sizing for perfect circles */
+            transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+        }
+        .custom-icon-wrapper i { font-size: 13px; color: #2c3e50; }
+        
+        /* Optional: Make the glowing route look even better */
+        .glowing-route { filter: drop-shadow(0px 0px 4px rgba(255, 0, 0, 0.8)); }
+    </style>
 
     <style>
         :root { --bg: #fcfcfc; --text: #2c3e50; --accent: #3498db; }
@@ -68,6 +89,14 @@
         </div>
 
         <div class="control-group switch-container">
+            <label style="margin: 0;">Season (Winter/Summer)</label>
+            <label class="switch">
+                <input type="checkbox" id="season-toggle" onchange="toggleSeason()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="control-group switch-container">
             <label style="margin: 0;">Allow Snow Routes</label>
             <label class="switch">
                 <input type="checkbox" id="snow-toggle" checked onchange="handleSnowToggle()">
@@ -75,110 +104,122 @@
             </label>
         </div>
 
-        <button class="run-btn" onclick="runAlgorithm()">Run Algorithm</button>
+        <button onclick="calculateQuantumPath()">Run Algorithm</button>
     </div>
 
     <div id="map"></div>
 
-    <script>
-        const map = L.map('map', { zoomControl: false }).setView([42.6, 0.52], 12);
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        const bgLayer = L.layerGroup().addTo(map);
+    <script>
+        var map = L.map('map').setView([42.60, 0.52], 12);
+
+        // Muted background map
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17, opacity: 0.4, attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        // Create separate layers so edges stay behind nodes and the path stays on top
+        const edgeLayer = L.layerGroup().addTo(map);
         const nodeLayer = L.layerGroup().addTo(map);
         const pathLayer = L.layerGroup().addTo(map);
 
-        const iconMapping = { 'Peak': 'fa-mountain', 'Town': 'fa-city', 'Landmark': 'fa-monument', 'Snow': 'fa-snowflake', 'Refugio': 'fa-campground', 'Lake': 'fa-water', 'Resting Area': 'fa-mug-hot' };
-        const terrainColors = { 'Snow': '#d4f1f9', 'Mountain': '#9a8b71', 'Town': '#b08d6a', 'Trail': '#f3e5ab' };
+        // FontAwesome Icons mapping
+        const iconMap = {
+            'Landmark': 'fa-monument', 'Peak': 'fa-mountain', 'Lake': 'fa-water',     
+            'Urban': 'fa-city', 'Trail': 'fa-hiking', 'Mountain': 'fa-tree', 'Snow': 'fa-snowflake'      
+        };
 
-        // Store markers globally to manipulate them later
-        let mapMarkers = [];
+        // Pastel background colors for the icons based on the active Terrain
+        const terrainColors = {
+            'S': '#d4f1f9',       // Icy Blue
+            'M': '#9a8b71',   // Earthy Brown
+            'U': '#b08d6a',      // Brick
+            'T': '#f3e5ab',      // Sand/Yellow
+            'U': '#b08d6a'        // Fallback
+        };
 
-        // 1. Fetch data from Flask
-        async function loadData() {
-            const response = await fetch('/api/data');
-            const nodes = await response.json();
+        let globalNodes = [];
+
+        // The function that draws (and redraws) the icons based on the season
+        function drawNodes(season) {
+            nodeLayer.clearLayers(); // Clear old icons before drawing new ones
+
+            globalNodes.forEach(node => {
+                // Pick the right terrain data based on the toggle
+                let activeTerrain = season === 'winter' ? node.terrain_winter : node.terrain_summer;
+                
+                // Get the background color (default to white if terrain isn't mapped)
+                let bgColor = terrainColors[activeTerrain] || '#ffffff';
+                let faClass = iconMap[node.type] || 'fa-map-pin'; 
+                
+                // Inject the background color directly into the HTML of the icon!
+                let customIcon = L.divIcon({
+                    className: 'clear-background', 
+                    html: `<div class="custom-icon-wrapper" style="background-color: ${bgColor}; border-color: #2c3e50;">
+                            <i class="fas ${faClass}" style="color: #2c3e50;"></i>
+                        </div>`,
+                    iconSize: [30, 30], 
+                    iconAnchor: [15, 15]
+                });
+                
+                L.marker([node.lat, node.lon], {icon: customIcon})
+                .bindPopup(`
+                    <b>${node.name}</b><br>
+                    Type: ${node.type}<br>
+                    Current Terrain: <b>${activeTerrain}</b>
+                `)
+                .addTo(nodeLayer);
+            });
+        }
+
+        // Called when the user clicks the Summer/Winter switch
+        function toggleSeason() {
+            const seasonElement = document.getElementById('season-toggle');
+            // If it exists and is checked, it's summer. Otherwise, winter.
+            const season = (seasonElement && seasonElement.checked) ? 'summer' : 'winter';
             
-            let pointsForTurf = [];
-
-            nodes.forEach(node => {
-                pointsForTurf.push(turf.point([node.lon, node.lat], { terrain: node.terrain }));
-                
-                const faIcon = iconMapping[node.type] || 'fa-circle';
-                const customIcon = L.divIcon({
-                    className: 'custom-icon-wrapper',
-                    html: `<i class="fas ${faIcon}"></i>`,
-                    iconSize: [26, 26], iconAnchor: [13, 13]
-                });
-
-                const marker = L.marker([node.lat, node.lon], { icon: customIcon })
-                    .bindPopup(`<b>Node ${node.id}</b><br>Type: ${node.type}`)
-                    .addTo(nodeLayer);
-                
-                // Save reference for the snow toggle logic
-                mapMarkers.push({ id: node.id, type: node.type, layer: marker });
-            });
-
-            // Voronoi Background
-            if (pointsForTurf.length > 2) {
-                let bbox = turf.bbox(turf.featureCollection(pointsForTurf));
-                bbox = [bbox[0]-0.1, bbox[1]-0.1, bbox[2]+0.1, bbox[3]+0.1];
-                const voronoiPolygons = turf.voronoi(turf.featureCollection(pointsForTurf), { bbox: bbox });
-
-                turf.featureEach(voronoiPolygons, (currentFeature, featureIndex) => {
-                    if (currentFeature) {
-                        const terrainLabel = pointsForTurf[featureIndex].properties.terrain;
-                        L.geoJSON(currentFeature, {
-                            style: { fillColor: terrainColors[terrainLabel] || '#ecf0f1', fillOpacity: 0.3, color: '#fff', weight: 1 }
-                        }).addTo(bgLayer);
-                    }
-                });
-            }
+            // Redraw the icons with the new season's colors
+            drawNodes(season);
         }
 
-        // 2. Handle Snow Toggle (Dimming)
-        function handleSnowToggle() {
-            const allowSnow = document.getElementById('snow-toggle').checked;
-            mapMarkers.forEach(item => {
-                if (item.type === 'Snow') {
-                    // Set opacity: 1 if allowed, 0.3 if turned off
-                    item.layer.setOpacity(allowSnow ? 1 : 0.3);
-                }
+        // Initial Fetch on page load
+        fetch('/api/data')
+            .then(response => response.json())
+            .then(data => {
+                globalNodes = data.nodes;
+                
+                // Draw Edges once (they don't change color)
+                data.edges.forEach(edge => {
+                    L.polyline(edge, {color: '#333333', weight: 2, opacity: 0.6, dashArray: '4, 6'}).addTo(edgeLayer);
+                });
+
+                // Draw Nodes for the first time (Defaulting to Winter / unchecked)
+                drawNodes('winter');
             });
-        }
 
-        // 3. Request Algorithm Path from Flask
-        async function runAlgorithm() {
-            const difficulty = document.getElementById('difficulty').value;
-            const allowSnow = document.getElementById('snow-toggle').checked;
+        function calculateQuantumPath() {
+            const diffElement = document.getElementById('difficulty');
+            const snowElement = document.getElementById('snow-toggle');
+            const seasonElement = document.getElementById('season-toggle'); 
+            
+            const requestData = {
+                difficulty: diffElement ? diffElement.value : 'medium', 
+                allow_snow: snowElement ? snowElement.checked : true,
+                season: (seasonElement && seasonElement.checked) ? 'summer' : 'winter'
+            };
 
-            const response = await fetch('/api/calculate_path', {
+            fetch('/api/calculate_path', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ difficulty: difficulty, allow_snow: allowSnow })
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                pathLayer.clearLayers();
+                const route = L.polyline(data.path, { color: '#FF0000', weight: 6, opacity: 0.9, className: 'glowing-route' }).addTo(pathLayer);
+                map.flyToBounds(route.getBounds(), {padding: [50, 50], duration: 1.5});
             });
-            
-            const data = await response.json();
-            
-            // Clear previous paths
-            pathLayer.clearLayers();
-
-            if (data.path && data.path.length > 0) {
-                // Draw a thick, highly visible line for the chosen route
-                const route = L.polyline(data.path, {
-                    color: '#e74c3c', // Bright Red
-                    weight: 6,
-                    opacity: 0.8,
-                    lineJoin: 'round'
-                }).addTo(pathLayer);
-                
-                // Animate map to focus on the new path
-                map.fitBounds(route.getBounds(), { padding: [50, 50], animate: true });
-            }
         }
-
-        // Initialize
-        loadData();
     </script>
 </body>
 </html>
