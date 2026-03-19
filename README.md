@@ -1,4 +1,4 @@
-# 🏔️ Q-Route: Quantum-Beam-Search for Assisted Alpine Routing
+# 🏔️ Quantum-Beam-Search: Assisted Alpine Routing
 
 ![Status](https://img.shields.io/badge/Status-Work%20in%20Progress%20%E2%9A%92%EF%B8%8F-orange)
 ![Event](https://img.shields.io/badge/Event-Spring%20School%20NTQC%202026-blue)
