@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Benasque Algorithm Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <style>
+        :root { --bg: #fcfcfc; --text: #2c3e50; --accent: #3498db; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: 'Inter', sans-serif; overflow: hidden; }
+        #map { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+
+        /* Sidebar UI */
+        #sidebar {
+            position: absolute; top: 20px; left: 20px; width: 320px;
+            background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);
+            border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); z-index: 1000; padding: 25px;
+        }
+        h2 { margin-top: 0; font-size: 18px; color: var(--text); border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        
+        .control-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #555; }
+        
+        select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc; font-family: 'Inter'; }
+
+        /* Toggle Switch */
+        .switch-container { display: flex; align-items: center; justify-content: space-between; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        /* Button */
+        button.run-btn {
+            width: 100%; padding: 12px; background: var(--text); color: white;
+            border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
+            cursor: pointer; transition: background 0.2s; margin-top: 10px;
+        }
+        button.run-btn:hover { background: #1a252f; }
+
+        /* Node Icons */
+        .custom-icon-wrapper {
+            display: flex; align-items: center; justify-content: center;
+            background: white; border-radius: 50%; border: 2px solid #2c3e50;
+            transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .custom-icon-wrapper i { font-size: 12px; color: #2c3e50; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Pathfinder Controls</h2>
+        
+        <div class="control-group">
+            <label>Difficulty</label>
+            <select id="difficulty">
+                <option value="easy">Easy (Scenic)</option>
+                <option value="medium" selected>Medium (Standard)</option>
+                <option value="hard">Hard (Direct/Steep)</option>
+            </select>
+        </div>
+
+        <div class="control-group switch-container">
+            <label style="margin: 0;">Allow Snow Routes</label>
+            <label class="switch">
+                <input type="checkbox" id="snow-toggle" checked onchange="handleSnowToggle()">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <button class="run-btn" onclick="runAlgorithm()">Run Algorithm</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        const map = L.map('map', { zoomControl: false }).setView([42.6, 0.52], 12);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        const bgLayer = L.layerGroup().addTo(map);
+        const nodeLayer = L.layerGroup().addTo(map);
+        const pathLayer = L.layerGroup().addTo(map);
+
+        const iconMapping = { 'Peak': 'fa-mountain', 'Town': 'fa-city', 'Landmark': 'fa-monument', 'Snow': 'fa-snowflake', 'Refugio': 'fa-campground', 'Lake': 'fa-water', 'Resting Area': 'fa-mug-hot' };
+        const terrainColors = { 'Snow': '#d4f1f9', 'Mountain': '#9a8b71', 'Town': '#b08d6a', 'Trail': '#f3e5ab' };
+
+        // Store markers globally to manipulate them later
+        let mapMarkers = [];
+
+        // 1. Fetch data from Flask
+        async function loadData() {
+            const response = await fetch('/api/data');
+            const nodes = await response.json();
+            
+            let pointsForTurf = [];
+
+            nodes.forEach(node => {
+                pointsForTurf.push(turf.point([node.lon, node.lat], { terrain: node.terrain }));
+                
+                const faIcon = iconMapping[node.type] || 'fa-circle';
+                const customIcon = L.divIcon({
+                    className: 'custom-icon-wrapper',
+                    html: `<i class="fas ${faIcon}"></i>`,
+                    iconSize: [26, 26], iconAnchor: [13, 13]
+                });
+
+                const marker = L.marker([node.lat, node.lon], { icon: customIcon })
+                    .bindPopup(`<b>Node ${node.id}</b><br>Type: ${node.type}`)
+                    .addTo(nodeLayer);
+                
+                // Save reference for the snow toggle logic
+                mapMarkers.push({ id: node.id, type: node.type, layer: marker });
+            });
+
+            // Voronoi Background
+            if (pointsForTurf.length > 2) {
+                let bbox = turf.bbox(turf.featureCollection(pointsForTurf));
+                bbox = [bbox[0]-0.1, bbox[1]-0.1, bbox[2]+0.1, bbox[3]+0.1];
+                const voronoiPolygons = turf.voronoi(turf.featureCollection(pointsForTurf), { bbox: bbox });
+
+                turf.featureEach(voronoiPolygons, (currentFeature, featureIndex) => {
+                    if (currentFeature) {
+                        const terrainLabel = pointsForTurf[featureIndex].properties.terrain;
+                        L.geoJSON(currentFeature, {
+                            style: { fillColor: terrainColors[terrainLabel] || '#ecf0f1', fillOpacity: 0.3, color: '#fff', weight: 1 }
+                        }).addTo(bgLayer);
+                    }
+                });
+            }
+        }
+
+        // 2. Handle Snow Toggle (Dimming)
+        function handleSnowToggle() {
+            const allowSnow = document.getElementById('snow-toggle').checked;
+            mapMarkers.forEach(item => {
+                if (item.type === 'Snow') {
+                    // Set opacity: 1 if allowed, 0.3 if turned off
+                    item.layer.setOpacity(allowSnow ? 1 : 0.3);
+                }
+            });
+        }
+
+        // 3. Request Algorithm Path from Flask
+        async function runAlgorithm() {
+            const difficulty = document.getElementById('difficulty').value;
+            const allowSnow = document.getElementById('snow-toggle').checked;
+
+            const response = await fetch('/api/calculate_path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ difficulty: difficulty, allow_snow: allowSnow })
+            });
+            
+            const data = await response.json();
+            
+            // Clear previous paths
+            pathLayer.clearLayers();
+
+            if (data.path && data.path.length > 0) {
+                // Draw a thick, highly visible line for the chosen route
+                const route = L.polyline(data.path, {
+                    color: '#e74c3c', // Bright Red
+                    weight: 6,
+                    opacity: 0.8,
+                    lineJoin: 'round'
+                }).addTo(pathLayer);
+                
+                // Animate map to focus on the new path
+                map.fitBounds(route.getBounds(), { padding: [50, 50], animate: true });
+            }
+        }
+
+        // Initialize
+        loadData();
+    </script>
+</body>
+</html>
