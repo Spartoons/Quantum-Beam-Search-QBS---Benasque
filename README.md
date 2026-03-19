@@ -2,7 +2,6 @@
 
 ![Status](https://img.shields.io/badge/Status-Work%20in%20Progress%20%E2%9A%92%EF%B8%8F-orange)
 ![Event](https://img.shields.io/badge/Event-Spring%20School%20NTQC%202026-blue)
-![Hardware](https://img.shields.io/badge/Hardware-Mare%20Nostrum5%20Ona%20(4q)-purple)
 
 **Q-Route** is a B2B SaaS prototype designed for tourism operators in the Benasque Valley. It generates highly optimized, personalized one-day hiking routes by combining classical graph heuristics with **Quantum Amplitude Encoding** to escape local minima in complex orienteering problems.
 
