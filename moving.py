@@ -27,5 +27,7 @@ def choose_path(psi: np.ndarray,rep, statistics= False):
     qc_trans = transpile(qc, backend)
     job = backend.run(qc_trans)
     result = job.result()
-    return result.get_counts()
+    counts = result.get_counts()
+    bitstring = list(counts.keys())[0]
+    return int(bitstring, 2)
     
