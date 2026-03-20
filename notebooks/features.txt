@@ -1,0 +1,2 @@
+- Time estimator UI
+- If path is too long (more than daylight: 15h summer, 10 hours winter), then that path is no good.

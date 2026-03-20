@@ -1,0 +1,7 @@
+Flask
+pandas
+networkx
+numpy
+qiskit
+qiskit-aer
+gunicorn

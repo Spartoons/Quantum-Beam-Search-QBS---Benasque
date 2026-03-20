@@ -28,6 +28,23 @@
         
         /* Optional: Make the glowing route look even better */
         .glowing-route { filter: drop-shadow(0px 0px 4px rgba(255, 0, 0, 0.8)); }
+
+        /* Route Summary Styles */
+        #route-summary {
+            display: none; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;
+        }
+        .summary-header { font-size: 16px; color: var(--text); margin-top: 0; margin-bottom: 10px; }
+        .total-time-badge { 
+            display: inline-block; background: #e8f4fd; color: var(--accent); 
+            padding: 5px 10px; border-radius: 6px; font-weight: 600; font-size: 14px; margin-bottom: 15px; 
+        }
+        #step-list { max-height: 300px; overflow-y: auto; padding-right: 5px; }
+        .step-item {
+            padding: 10px; border-radius: 6px; background: #f8f9fa; margin-bottom: 8px; 
+            border-left: 3px solid var(--accent); font-size: 13px;
+        }
+        .step-name { font-weight: 600; margin-bottom: 4px; color: var(--text); }
+        .step-meta { color: #666; font-size: 11px; display: flex; gap: 10px; }
     </style>
 
     <style>
@@ -72,6 +89,25 @@
             transition: all 0.3s ease; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         .custom-icon-wrapper i { font-size: 12px; color: #2c3e50; }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                top: auto;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                border-radius: 20px 20px 0 0; /* Only round the top corners */
+                padding: 15px 20px;
+                box-sizing: border-box;
+                max-height: 50vh; /* Don't let it cover more than half the screen */
+                overflow-y: auto; /* Allow scrolling within the sidebar */
+            }
+            
+            /* Move Leaflet attribution and controls out of the way */
+            .leaflet-control-container .leaflet-bottom {
+                bottom: 50vh; 
+            }
+        }
     </style>
 </head>
 <body>
@@ -104,11 +140,18 @@
             </label>
         </div>
 
-        <button onclick="calculateQuantumPath()">Run Algorithm</button>
+        <button class="run-btn" onclick="runAlgorithm()">Run Algorithm</button>
+
+        <div id="route-summary">
+            <h3 class="summary-header">Route Summary</h3>
+            <div class="total-time-badge">
+                <i class="fas fa-stopwatch"></i> Expected Time: <span id="total-time">0</span>
+            </div>
+            <div id="step-list"></div>
+        </div>
     </div>
 
     <div id="map"></div>
-
 
     <script>
         var map = L.map('map').setView([42.60, 0.52], 12);
@@ -118,7 +161,7 @@
             maxZoom: 17, opacity: 0.4, attribution: '&copy; OpenStreetMap'
         }).addTo(map);
 
-        // Create separate layers so edges stay behind nodes and the path stays on top
+        // Create separate layers
         const edgeLayer = L.layerGroup().addTo(map);
         const nodeLayer = L.layerGroup().addTo(map);
         const pathLayer = L.layerGroup().addTo(map);
@@ -129,30 +172,31 @@
             'Urban': 'fa-city', 'Trail': 'fa-hiking', 'Mountain': 'fa-tree', 'Snow': 'fa-snowflake'      
         };
 
-        // Pastel background colors for the icons based on the active Terrain
+        // Pastel background colors for the icons
         const terrainColors = {
-            'S': '#d4f1f9',       // Icy Blue
-            'M': '#9a8b71',   // Earthy Brown
-            'U': '#b08d6a',      // Brick
-            'T': '#f3e5ab',      // Sand/Yellow
-            'U': '#b08d6a'        // Fallback
+            'S': '#d4f1f9', 'M': '#9a8b71', 'U': '#b08d6a', 'T': '#f3e5ab'
         };
 
         let globalNodes = [];
 
-        // The function that draws (and redraws) the icons based on the season
+        // Draws the icons based on the season
         function drawNodes(season) {
-            nodeLayer.clearLayers(); // Clear old icons before drawing new ones
+            nodeLayer.clearLayers(); 
+            
+            // 1. Check if the user wants to see snow nodes
+            const snowEnabled = document.getElementById('snow-toggle').checked;
 
             globalNodes.forEach(node => {
-                // Pick the right terrain data based on the toggle
                 let activeTerrain = season === 'winter' ? node.terrain_winter : node.terrain_summer;
                 
-                // Get the background color (default to white if terrain isn't mapped)
+                // 2. If it's a snow node and the toggle is OFF, skip drawing it!
+                if (!snowEnabled && activeTerrain === 'S') {
+                    return; 
+                }
+
                 let bgColor = terrainColors[activeTerrain] || '#ffffff';
                 let faClass = iconMap[node.type] || 'fa-map-pin'; 
                 
-                // Inject the background color directly into the HTML of the icon!
                 let customIcon = L.divIcon({
                     className: 'clear-background', 
                     html: `<div class="custom-icon-wrapper" style="background-color: ${bgColor}; border-color: #2c3e50;">
@@ -163,22 +207,23 @@
                 });
                 
                 L.marker([node.lat, node.lon], {icon: customIcon})
-                .bindPopup(`
-                    <b>${node.name}</b><br>
-                    Type: ${node.type}<br>
-                    Current Terrain: <b>${activeTerrain}</b>
-                `)
+                .bindPopup(`<b>${node.name}</b><br>Type: ${node.type}<br>Current Terrain: <b>${activeTerrain}</b>`)
                 .addTo(nodeLayer);
             });
+        }
+
+        // New handleSnowToggle function
+        function handleSnowToggle() {
+            // Figure out the current season, then trigger a map redraw
+            const seasonElement = document.getElementById('season-toggle');
+            const season = (seasonElement && seasonElement.checked) ? 'summer' : 'winter';
+            drawNodes(season);
         }
 
         // Called when the user clicks the Summer/Winter switch
         function toggleSeason() {
             const seasonElement = document.getElementById('season-toggle');
-            // If it exists and is checked, it's summer. Otherwise, winter.
             const season = (seasonElement && seasonElement.checked) ? 'summer' : 'winter';
-            
-            // Redraw the icons with the new season's colors
             drawNodes(season);
         }
 
@@ -187,19 +232,16 @@
             .then(response => response.json())
             .then(data => {
                 globalNodes = data.nodes;
-                
-                // Draw Edges once (they don't change color)
                 data.edges.forEach(edge => {
                     L.polyline(edge, {color: '#333333', weight: 2, opacity: 0.6, dashArray: '4, 6'}).addTo(edgeLayer);
                 });
-
-                // Draw Nodes for the first time (Defaulting to Winter / unchecked)
                 drawNodes('winter');
             });
 
-        function calculateQuantumPath() {
+        async function runAlgorithm() {
             const diffElement = document.getElementById('difficulty');
-            const snowElement = document.getElementById('snow-toggle');
+            // Handles both naming conventions just to be safe
+            const snowElement = document.getElementById('snow-toggle') || document.getElementById('snow_toggle');
             const seasonElement = document.getElementById('season-toggle'); 
             
             const requestData = {
@@ -208,17 +250,57 @@
                 season: (seasonElement && seasonElement.checked) ? 'summer' : 'winter'
             };
 
-            fetch('/api/calculate_path', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(requestData)
-            })
-            .then(response => response.json())
-            .then(data => {
+            try {
+                const response = await fetch('/api/calculate_path', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(requestData)
+                });
+                
+                const data = await response.json();
                 pathLayer.clearLayers();
-                const route = L.polyline(data.path, { color: '#FF0000', weight: 6, opacity: 0.9, className: 'glowing-route' }).addTo(pathLayer);
-                map.flyToBounds(route.getBounds(), {padding: [50, 50], duration: 1.5});
-            });
+
+                // Safety check: Make sure we have a valid path to draw
+                if (data.path && data.path.length > 1) {
+                    const route = L.polyline(data.path, { 
+                        color: '#FF0000', weight: 6, opacity: 0.9, className: 'glowing-route' 
+                    }).addTo(pathLayer);
+                    
+                    map.flyToBounds(route.getBounds(), {padding: [50, 50], duration: 1.5});
+                    
+                    // --- NEW: Populate Sidebar Summary ---
+                    document.getElementById('route-summary').style.display = 'block';
+                    
+                    // Convert decimal hours (e.g., 1.5) to Hours and Minutes (1h 30m)
+                    const hrs = Math.floor(data.total_time);
+                    const mins = Math.round((data.total_time - hrs) * 60);
+                    document.getElementById('total-time').innerText = `${hrs}h ${mins}m`;
+                    
+                    const stepList = document.getElementById('step-list');
+                    stepList.innerHTML = ''; // Clear previous steps
+                    
+                    data.details.forEach((step, index) => {
+                        let timeText = index === 0 ? "Start" : `+${Math.round(step.step_time * 60)} mins`;
+                        
+                        let stepHtml = `
+                            <div class="step-item">
+                                <div class="step-name">${index + 1}. ${step.name}</div>
+                                <div class="step-meta">
+                                    <span><i class="fas fa-walking"></i> ${timeText}</span>
+                                    <span><i class="fas fa-mountain"></i> ${step.elevation}m</span>
+                                </div>
+                            </div>
+                        `;
+                        stepList.innerHTML += stepHtml;
+                    });
+
+                } else {
+                    alert("The selected difficulty/constraints isolated the starting point. No valid paths found!");
+                }
+            } catch (err) {
+                console.error("Error calculating path:", err);
+                alert("The backend crashed! Check your Python terminal for the error.");
+            }
         }
     </script>
 </body>

@@ -44,6 +44,19 @@ def initialize_graph():
         terrains = pd.read_csv('terrain.csv', header=None).fillna('')
         winter_terrains = terrains.iloc[0].tolist() if len(terrains) > 0 else []
         summer_terrains = terrains.iloc[1].tolist() if len(terrains) > 1 else winter_terrains
+
+        try:
+            with open('places.csv', 'r', encoding='utf-8') as f:
+                # Read the single line, split by comma, and clean up whitespace
+                places_names = [name.strip() for name in f.read().split(',') if name.strip()]
+        except FileNotFoundError:
+            places_names = [] # Fallback if file doesn't exist yet
+
+        try:
+            with open('elevations.csv', 'r', encoding='utf-8') as f:
+                elevations_data = [float(e.strip()) for e in f.read().split(',') if e.strip()]
+        except FileNotFoundError:
+            elevations_data = []
         
         type_weights = {'Urban': 0.2, 'Trail': 0.4, 'Mountain': 0.6, 'Snow': 0.8}
         
@@ -56,15 +69,18 @@ def initialize_graph():
             
             n_type = str(types[i]).strip() if i < len(types) and str(types[i]) != '' else 'Landmark'
 
+            n_name = places_names[i] if i < len(places_names) else f"Nosde {node_id}"
+            n_elev = elevations_data[i] if i < len(elevations_data) else "-" # <-- NEW
+
             # Extract both terrains
             terrain_w = str(winter_terrains[i]).strip() if i < len(winter_terrains) and str(winter_terrains[i]) != '' else 'Mountain'
             terrain_s = str(summer_terrains[i]).strip() if i < len(summer_terrains) and str(summer_terrains[i]) != '' else 'Mountain'
 
             G.add_node(
                 node_id,
-                name=f"Node {node_id}",
+                name=n_name,
                 type=n_type,
-                elevation=0, 
+                elevation=n_elev, 
                 terrain_winter=terrain_w,
                 terrain_summer=terrain_s,
                 type_val_winter=type_weights.get(terrain_w, 0.6),
@@ -72,7 +88,7 @@ def initialize_graph():
             )
             
             FRONTEND_NODES.append({
-                'id': i, 'graph_id': node_id, 'name': f"Node {node_id}",
+                'id': i, 'graph_id': node_id, 'name': n_name,
                 'lat': row['Y'], 'lon': row['X'], 'type': n_type,
                 'terrain_winter': terrain_w, 'terrain_summer': terrain_s
             })
@@ -103,133 +119,109 @@ def initialize_graph():
 # ==========================================
 # 2. EPSILON HEURISTIC & PATHFINDING
 # ==========================================
-def calculate_epsilon(path, user_profile):
-    cost = 0.0
-    season = user_profile.get('season', 'winter') # Get the current season
-    
-    for i in range(len(path) - 1):
-        u, v = path[i], path[i+1]
-        
-        # Select the correct mathematical weight based on the season!
-        val_key = 'type_val_winter' if season == 'winter' else 'type_val_summer'
-        val_u = float(G.nodes[u].get(val_key, 0.6))
-        val_v = float(G.nodes[v].get(val_key, 0.6))
-        mean_type = np.mean([val_u, val_v]) 
-        
-        time_val = float(G[u][v].get("weight", 0.1))
-        elev_u = float(G.nodes[u].get("elevation", 0.0))
-        elev_v = float(G.nodes[v].get("elevation", 0.0))
-        dif_height = elev_v - elev_u  
-        
-        cost += (mean_type * time_val * dif_height)
-        
-    return cost
-
 def tensor_network_heuristic(epsilon_scores, difficulty):
-    """
-    Acts as a Tensor Network layer. 
-    It takes the raw Epsilon effort and transforms it into Quantum Amplitudes (psi) 
-    based on how hard the user wants the route to be.
-    """
-    # Convert to numpy tensor
     scores = np.array(epsilon_scores, dtype=float)
     
-    # If paths are identical in effort, avoid division by zero
+    # FIX 1: Properly normalize the identical-scores fallback
     if np.all(scores == scores[0]):
-        return np.ones_like(scores)
+        psi = np.ones_like(scores)
+        return psi / np.linalg.norm(psi) 
 
-    # Tensor Transformation based on Difficulty
     if difficulty == 'easy':
-        # Easy: We want lowest effort to have the HIGHEST amplitude
-        # Shift scores to be positive, then invert
         scores = scores - np.min(scores) + 1e-5
         psi = 1.0 / scores
     elif difficulty == 'hard':
-        # Hard: We want the highest effort to have the HIGHEST amplitude
         psi = scores - np.min(scores) + 1e-5
-    else: # medium
-        # Medium: We want efforts closest to the average to have the HIGHEST amplitude
+    else: 
         target = np.mean(scores)
         distances_from_mean = np.abs(scores - target)
         psi = 1.0 / (distances_from_mean + 1e-5)
         
-    # Return the normalized amplitudes for the Quantum Walker
     return psi / np.linalg.norm(psi)
 
-def quantum_selector(possible_paths, user_profile):
-    print(f"  -> Evaluating paths for {user_profile.get('season')}...")
-    epsilon_scores = []
-    valid_paths = []
+def calculate_epsilon(G_req, path, user_profile, current_route):
+    cost = 0.0
+    season = user_profile.get('season', 'winter') 
     
-    terrain_key = 'terrain_winter' if user_profile.get('season', 'winter') == 'winter' else 'terrain_summer'
-    
-    for path in possible_paths:
-        # Filter snow based on the active season's terrain
-        has_snow = any(G.nodes[n].get(terrain_key) == 'Snow' for n in path[1:])
-        if not user_profile.get('allow_snow', True) and has_snow:
-            continue 
-            
-        valid_paths.append(path)
-        # Pass user_profile into epsilon now!
-        epsilon_scores.append(calculate_epsilon(path, user_profile))
+    for i in range(len(path) - 1):
+        u, v = path[i], path[i+1]
         
-    if not valid_paths:
-        return possible_paths[0] # Fallback if constraints block everything
+        val_key = 'type_val_winter' if season == 'winter' else 'type_val_summer'
+        val_u = float(G_req.nodes[u].get(val_key, 0.6))
+        val_v = float(G_req.nodes[v].get(val_key, 0.6))
+        mean_type = np.mean([val_u, val_v]) 
+        
+        edge_data = G_req[u][v]
+        time_val = float(edge_data.get("weight", 0.1))
+        
+        elev_u = float(G_req.nodes[u].get("elevation", 0.0))
+        elev_v = float(G_req.nodes[v].get("elevation", 0.0))
+        
+        # FIX 2: Absolute value so going downhill (negative) doesn't break the tensor score
+        dif_height = abs(elev_v - elev_u)  
+        if dif_height < 1: 
+            dif_height = 1.0
+        
+        step_cost = (mean_type * time_val * dif_height)
+        
+        # FIX 3: THE BACKTRACK PENALTY
+        # If the node is already in our route, make it 10x more expensive.
+        if v in current_route:
+            step_cost *= 10.0
+            
+        cost += step_cost
+        
+    return cost
 
-    # 2. Tensor Network: Convert Epsilon to Quantum Amplitudes based on difficulty
+def quantum_selector(G_req, possible_paths, user_profile, current_route):
+    print(f"  -> Evaluating {len(possible_paths)} paths with Quantum Pipeline...")
+    
+    if not possible_paths:
+        return []
+        
+    if len(possible_paths) == 1:
+        print(f"  -> Only 1 path available. Deterministic bypass.")
+        return possible_paths[0]
+
+    epsilon_scores = []
+    for path in possible_paths:
+        # Pass the route down to the heuristic
+        epsilon_scores.append(calculate_epsilon(G_req, path, user_profile, current_route))
+        
     psi = tensor_network_heuristic(epsilon_scores, user_profile.get('difficulty', 'medium'))
     
-    # 3. Quantum Walker: Execute your Qiskit circuit in moving.py
-    # `choose_path` runs Time Evolution and returns something like {'010': 1}
-    counts = choose_path(psi, rep=1)
-    
-    # Extract the binary string measured by the quantum computer
-    measured_binary = list(counts.keys())[0]
-    
-    # Convert binary back to a standard integer index
-    measured_idx = int(measured_binary, 2)
-    
-    # Handle Qubit padding (if 5 paths exist, Qiskit pads to 8. If 7 is measured, modulo it)
-    if measured_idx >= len(valid_paths):
-        measured_idx = measured_idx % len(valid_paths)
+    try:
+        counts = choose_path(psi, rep=1)
+        measured_binary = list(counts.keys())[0]
+        measured_idx = int(measured_binary, 2)
+    except Exception as e:
+        print(f"[!] Quantum Simulator Exception: {e}")
+        print(f"[!] Failing gracefully to Classical Random Selector...")
+        measured_idx = random.randint(0, len(possible_paths) - 1)
         
-    selected_path = valid_paths[measured_idx]
-    print(f"  -> Quantum Walker Collapsed on Index {measured_idx} (Epsilon Score: {epsilon_scores[measured_idx]:.2f})")
+    if measured_idx >= len(possible_paths):
+        measured_idx = measured_idx % len(possible_paths)
+        
+    selected_path = possible_paths[measured_idx]
+    print(f"  -> Collapsed on Index {measured_idx} (Epsilon Score: {epsilon_scores[measured_idx]:.2f})")
     
     return selected_path
 
-def get_2_step_paths(current_node, visited_nodes):
+def get_2_step_paths(G_req, current_node):
     paths = []
-    for n1 in G.neighbors(current_node):
-        if n1 in visited_nodes: continue
+    # Safety check in case the current node was deleted by constraints
+    if current_node not in G_req: 
+        return paths
+
+    for n1 in G_req.neighbors(current_node):
         has_n2 = False
-        for n2 in G.neighbors(n1):
-            if n2 != current_node and n2 not in visited_nodes:
+        for n2 in G_req.neighbors(n1):
+            if n2 != current_node:
                 paths.append([current_node, n1, n2])
                 has_n2 = True
         if not has_n2:
             paths.append([current_node, n1])
     return paths
-
-def placeholder_selector(possible_paths, user_profile):
-    """
-    Evaluates paths using Epsilon and returns the absolute best one.
-    This is where `moving.choose_path` will be inserted later!
-    """
-    best_path = None
-    best_score = -float('inf')
-    
-    for path in possible_paths:
-        score = calculate_epsilon(path, user_profile)
-        if score > best_score:
-            best_score = score
-            best_path = path
-            
-    # If all paths are invalid (e.g., snow blocked), just pick a random valid step backward
-    if best_path is None:
-        return random.choice(possible_paths) 
-        
-    return best_path
 
 # ==========================================
 # 3. FLASK ROUTES
@@ -251,50 +243,155 @@ def get_data():
 def calculate_path():
     data = request.json
     
-    # Extract user profile from frontend
     user_profile = {
         'allow_snow': data.get('allow_snow', True),
         'difficulty': data.get('difficulty', 'medium'),
-        'season': data.get('season', 'winter'), # Added this line!
-        'time_budget': 10 if data.get('difficulty') == 'hard' else 6
+        'season': data.get('season', 'winter')
     }
     
     start_node = "3" # Benasque
-    route = [start_node]
-    current_node = start_node
+    G_req = G.copy()
+    
+    season = user_profile['season']
+    terrain_key = 'terrain_winter' if season == 'winter' else 'terrain_summer'
+    snow_identifiers = ['Snow', 'S']
+    city_identifiers = ['Urban', 'Town', 'City', 'U']
+
+    # RULE 1: Remove Snow nodes entirely
+    if not user_profile['allow_snow']:
+        snow_nodes = [n for n in list(G_req.nodes) if G_req.nodes[n].get(terrain_key) in snow_identifiers or G_req.nodes[n].get('type') in snow_identifiers]
+        G_req.remove_nodes_from(snow_nodes)
+        
+    city_nodes = [n for n in list(G_req.nodes) if G_req.nodes[n].get('type') in city_identifiers or G_req.nodes[n].get(terrain_key) in city_identifiers or "Besurta" in G_req.nodes[n].get('name', '')]
+    
+    # ==========================================
+    # RULE 2 & 3: SUPER NODE CONTRACTION
+    # ==========================================
+    super_node = "SUPER_CITY"
+    entry_exit_map = {} # Remembers which real city connects to which mountain
+
+    if user_profile['difficulty'] == 'easy':
+        # EASY: Isolate Cities
+        non_city_nodes = [n for n in list(G_req.nodes) if n not in city_nodes]
+        if start_node in non_city_nodes: non_city_nodes.remove(start_node)
+        G_req.remove_nodes_from(non_city_nodes)
+        start_node_algo = start_node
+        
+    else:
+        # MEDIUM/HARD: True Contraction
+        if len(city_nodes) > 1:
+            # 1. Create the massive Super City
+            G_req.add_node(super_node, type='Urban', elevation=0, type_val_winter=0.2, type_val_summer=0.2, name="City Network")
+            
+            # 2. Re-wire all mountain/trail edges to point to the Super City instead
+            for city in city_nodes:
+                for neighbor in list(G_req.neighbors(city)):
+                    if neighbor not in city_nodes:
+                        weight = G_req[city][neighbor]['weight']
+                        
+                        # Save the shortest entry/exit point
+                        if G_req.has_edge(super_node, neighbor):
+                            if weight < G_req[super_node][neighbor]['weight']:
+                                G_req[super_node][neighbor]['weight'] = weight
+                                entry_exit_map[neighbor] = city
+                        else:
+                            G_req.add_edge(super_node, neighbor, weight=weight)
+                            entry_exit_map[neighbor] = city
+
+            # 3. Destroy the original internal cities so the algorithm can't get stuck in them
+            G_req.remove_nodes_from(city_nodes)
+            start_node_algo = super_node
+        else:
+            start_node_algo = start_node
+
+    # ==========================================
+    # EXECUTE HYBRID SEARCH
+    # ==========================================
+    route = [start_node_algo]
+    current_node = start_node_algo
     target_steps = 5 if user_profile['difficulty'] == 'hard' else 3
     
-    print(f"\n--- Starting Backend Route Generation (Snow allowed: {user_profile['allow_snow']}) ---")
-    
-    # 2-Step Lookahead Loop
     for step in range(target_steps):
-        possible_paths = get_2_step_paths(current_node, route)
-        if not possible_paths:
-            print("Dead end reached.")
-            break
+        possible_paths = get_2_step_paths(G_req, current_node)
+        if not possible_paths: break
             
-        selected_path = quantum_selector(possible_paths, user_profile)
-        next_node = selected_path[1] # Take exactly one step forward
-        
+        selected_path = quantum_selector(G_req, possible_paths, user_profile, route)
+        if not selected_path: break
+            
+        next_node = selected_path[1] 
         route.append(next_node)
         current_node = next_node
-        print(f"Step {step+1}: Moved to {G.nodes[next_node].get('name', next_node)}")
         
-    # Convert Graph IDs ('1', '2') back to Frontend Array Indices (0, 1)
-    # This ensures your frontend draws the polyline correctly!
-    # Convert Graph IDs ('1', '2') into [lat, lon] coordinates for Leaflet to draw
-    path_coords = []
-    for r_id in route:
-        for f_node in FRONTEND_NODES:
-            if f_node['graph_id'] == r_id:
-                # Ensure coordinates are strict floats (fixes comma vs dot decimal issues)
-                lat = float(str(f_node['lat']).replace(',', '.'))
-                lon = float(str(f_node['lon']).replace(',', '.'))
-                path_coords.append([lat, lon])
-                break
+    # Return Trip
+    if current_node != start_node_algo:
+        try:
+            return_path = nx.shortest_path(G_req, source=current_node, target=start_node_algo, weight='weight')
+            route.extend(return_path[1:]) 
+        except nx.NetworkXNoPath:
+            pass
 
-    print(f"Final Route Coords for Frontend: {path_coords}")
-    return jsonify({"path": path_coords})
+    # ==========================================
+    # DECOMPRESS SUPER NODE BACK TO REALITY
+    # ==========================================
+    if start_node_algo == super_node:
+        final_route = []
+        for i in range(len(route)):
+            curr = route[i]
+            if curr == super_node:
+                if i == 0: # Start of hike: leaving the city
+                    if len(route) > 1:
+                        exit_city = entry_exit_map[route[1]]
+                        path = nx.shortest_path(G, source=start_node, target=exit_city, weight='weight')
+                        final_route.extend(path)
+                    else:
+                        final_route.append(start_node)
+                        
+                elif i == len(route) - 1: # End of hike: returning to city
+                    entry_city = entry_exit_map[route[i-1]]
+                    final_route.append(entry_city)
+                    path = nx.shortest_path(G, source=entry_city, target=start_node, weight='weight')
+                    if len(path) > 1: final_route.extend(path[1:])
+                        
+                else: # Passing through the city network mid-hike
+                    entry_city = entry_exit_map[route[i-1]]
+                    exit_city = entry_exit_map[route[i+1]]
+                    final_route.append(entry_city)
+                    path = nx.shortest_path(G, source=entry_city, target=exit_city, weight='weight')
+                    if len(path) > 1: final_route.extend(path[1:])
+            else:
+                final_route.append(curr)
+    else:
+        final_route = route
+
+    # ==========================================
+    # PREPARE RICH UI RESPONSE
+    # ==========================================
+    path_details = []
+    total_time = 0.0
+    path_coords = []
+
+    for idx, r_id in enumerate(final_route):
+        f_node = next((n for n in FRONTEND_NODES if n['graph_id'] == r_id), None)
+        if f_node:
+            lat = float(str(f_node['lat']).replace(',', '.'))
+            lon = float(str(f_node['lon']).replace(',', '.'))
+            path_coords.append([lat, lon])
+        
+        step_time = 0.0
+        if idx > 0:
+            prev_id = final_route[idx-1]
+            if G.has_edge(prev_id, r_id):
+                step_time = float(G[prev_id][r_id].get('weight', 0.0))
+                total_time += step_time
+                
+        node_data = G.nodes[r_id]
+        path_details.append({
+            'name': node_data.get('name', f"Node {r_id}"),
+            'elevation': node_data.get('elevation', 0),
+            'step_time': step_time
+        })
+
+    return jsonify({"path": path_coords, "details": path_details, "total_time": total_time})
 
 if __name__ == '__main__':
     initialize_graph()
