@@ -1,42 +1,250 @@
-# 🏔️ Quantum-Beam-Search: Assisted Alpine Routing
+# 🏔️ Quantum Beam Search (QBS) - Benasque
 
-![Status](https://img.shields.io/badge/Status-Work%20in%20Progress%20%E2%9A%92%EF%B8%8F-orange)
-![Event](https://img.shields.io/badge/Event-Spring%20School%20NTQC%202026-blue)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
+[![Qiskit](https://img.shields.io/badge/Qiskit-1.0%2B-6133BD)](https://qiskit.org/)
+[![Flask](https://img.shields.io/badge/Flask-3.0%2B-black)](https://flask.palletsprojects.com/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
+[![Event](https://img.shields.io/badge/Event-NTQC%202026%20Spring%20School-blue)](https://www.icfo.eu/ntqc/)
 
-**Q-Route** is a B2B SaaS prototype designed for tourism operators in the Benasque Valley. It generates highly optimized, personalized one-day hiking routes by combining classical graph heuristics with **Quantum Amplitude Encoding** to escape local minima in complex orienteering problems.
+> **Quantum-Assisted Hiking Route Optimization in the Pyrenees**
 
-## ⚠️ Hackathon Notice
-> **We are currently in the coding phase of the NTQC 2026 Hackathon!** > *The code in this repository is actively being pushed. Final results, quantum circuit diagrams, and execution logs from the Mare Nostrum5 / Qmio hardware will be uploaded before the Friday 9:30 AM deadline.*
+A hybrid quantum-classical algorithm that generates optimized hiking routes through Benasque Valley by combining classical graph traversal with quantum amplitude encoding. Built during the NTQC 2026 Hackathon at the Spring School on Quantum Computing.
 
-## 🗺️ The Challenge
-Designing a mountain route is a constrained variant of the **Orienteering Problem**. We must maximize the "scenic value" (landmarks, peaks) while strictly adhering to user constraints (time, elevation budget, winter/summer gear) across 25 nodes in the Pyrenees. Classical greedy algorithms often fail to find the global optimum, getting trapped in local sub-optimal loops.
+---
 
-## ⚛️ Our Hybrid Architecture
-Instead of forcing a massive 25-node graph onto a near-term QPU, we designed a highly scalable **Quantum-Assisted Lookahead Search**:
+## ⚡ Quick Start
 
-1. **Classical 2-Step Lookahead:** We use `NetworkX` and `Pandas` to explore all valid paths 2 steps ahead of the hiker's current node, dynamically filtering by the user's gear and time constraints.
-2. **Heuristic Scoring:** Each path is assigned a classical desirability score based on distance, elevation gain, and landmark value.
-3. **Quantum Amplitude Encoding:** We normalize these scores and map them to the probability amplitudes of a 3-qubit or 4-qubit parameterized circuit.
-4. **Quantum Sampling:** We execute the circuit natively on the **Mare Nostrum5 Ona (4-qubit)** architecture. The quantum measurement collapses into our next move. 
-
-
-
-*Why this works:* By mapping heuristics to quantum amplitudes, we heavily bias the algorithm toward the best paths while maintaining a quantum-mechanical probability of exploring sub-optimal branches, perfectly balancing exploitation and exploration!
-
-## 🛠️ Tech Stack
-* **Quantum:** `Qiskit`, `Qiskit-Aer`
-* **Classical Routing:** `NetworkX`
-* **Data Processing:** `Pandas`, `NumPy`
-* **Target Hardware:** Mare Nostrum5 Ona (4 qubits), Qmio (32 qubits)
-
-## 🚀 How to Run (Coming Soon)
 ```bash
-# Clone the repo
-git clone [https://github.com/yourusername/Q-Route-Benasque.git](https://github.com/yourusername/Q-Route-Benasque.git)
-cd Q-Route-Benasque
+# Clone the repository
+git clone https://github.com/Spartoons/Quantum-Beam-Search-QBS---Benasque.git
+cd Quantum-Beam-Search-QBS---Benasque
 
-# Install requirements
+# Install dependencies
 pip install -r requirements.txt
 
-# Run the hybrid solver
-python main.py --user_profile beginner --max_hours 6
+# Run the application
+python run.py
+```
+
+Then open `http://localhost:5000` in your browser.
+
+---
+
+## 🎯 The Problem
+
+The **Orienteering Problem** in mountain hiking: Given 25 locations in Benasque Valley (peaks, towns, lakes, refugios), find the optimal route that:
+
+- ✅ Maximizes scenic value (landmarks, peaks, views)
+- ✅ Respects time budget constraints
+- ✅ Considers elevation gain/loss
+- ✅ Adapts to seasonal conditions (winter/summer)
+- ✅ Accounts for terrain difficulty
+
+Classical greedy algorithms often get trapped in local optima, missing better routes that require temporarily accepting suboptimal paths.
+
+---
+
+## ⚛️ Our Solution: Quantum-Assisted Lookahead Search
+
+Instead of forcing the entire 25-node graph onto limited quantum hardware, we designed a scalable hybrid architecture:
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    QUANTUM-CLASSICAL HYBRID                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+│  │   Classical  │───▶│   Classical  │───▶│   Quantum    │      │
+│  │   Graph      │    │   Heuristic  │    │   Sampling   │      │
+│  │   2-Step     │    │   Scoring    │    │   (Qiskit)   │      │
+│  │   Lookahead  │    │              │    │              │      │
+│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│         │                   │                   │               │
+│         ▼                   ▼                   ▼               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Path Selection Decision                     │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+1. **Classical 2-Step Lookahead**: Use NetworkX to explore all valid paths 2 steps ahead from the current position
+2. **Heuristic Scoring**: Assign scores based on distance, elevation gain, and landmark value
+3. **Quantum Amplitude Encoding**: Map normalized scores to probability amplitudes of a 3-4 qubit circuit
+4. **Quantum Sampling**: Execute on Qiskit Aer simulator
+5. **Measurement Collapse**: Quantum measurement determines the next move
+
+**Key Insight**: By mapping heuristics to quantum amplitudes, we bias toward optimal paths while maintaining quantum probability for exploration—balancing exploitation and exploration naturally.
+
+---
+
+## 🛠️ Tech Stack
+
+| Category | Technologies |
+|----------|--------------|
+| **Quantum Computing** | Qiskit, Qiskit-Aer |
+| **Classical Routing** | NetworkX, Pandas, NumPy |
+| **Web Framework** | Flask, Gunicorn |
+| **Frontend** | Leaflet.js, Font Awesome, Turf.js |
+
+---
+
+## 📁 Repository Structure
+
+```
+Quantum-Beam-Search-QBS---Benasque/
+├── data/                    # Dataset (CSV files)
+│   └── raw/                 # Original data
+│       ├── coordinates.csv  # GPS coordinates
+│       ├── distances.csv    # Travel times matrix
+│       ├── elevations.csv   # Elevation data
+│       ├── node_types.csv   # Location classifications
+│       ├── places.csv       # Location names
+│       └── terrain.csv      # Seasonal terrain difficulty
+│
+├── docs/                    # Documentation
+│   ├── hackathon/           # Hackathon materials
+│   └── images/              # Screenshots and diagrams
+│
+├── notebooks/               # Jupyter notebooks
+│   ├── exploration.ipynb    # Main analysis
+│   └── exploration_annika.ipynb
+│
+├── src/                     # Source code
+│   ├── app.py               # Flask application
+│   ├── quantum/             # Quantum modules
+│   │   └── path_selector.py # Quantum path selection
+│   ├── classical/           # Classical modules
+│   └── templates/
+│       └── index.html       # Web interface
+│
+├── tests/                   # Unit tests
+├── .gitignore
+├── LICENSE
+├── README.md
+├── requirements.txt
+└── run.py                   # Entry point
+```
+
+---
+
+## 🚀 Usage
+
+### Web Interface
+
+The easiest way to interact with the algorithm is through the web interface:
+
+```bash
+python run.py
+```
+
+Then navigate to `http://localhost:5000` and:
+
+1. Select difficulty level (Easy/Medium/Hard)
+2. Toggle season (Winter/Summer)
+3. Choose whether to allow snow routes
+4. Click "Run Algorithm" to see the optimized path
+
+### API Endpoints
+
+#### GET `/api/data`
+Returns all nodes and edges for map visualization.
+
+**Response:**
+```json
+{
+  "nodes": [...],
+  "edges": [...]
+}
+```
+
+#### POST `/api/calculate_path`
+Calculates an optimized route based on user preferences.
+
+**Request:**
+```json
+{
+  "difficulty": "medium",
+  "season": "winter",
+  "allow_snow": true
+}
+```
+
+**Response:**
+```json
+{
+  "path": [[lat, lon], ...],
+  "details": [...],
+  "total_time": 5.5
+}
+```
+
+### Programmatic Usage
+
+```python
+from src.quantum.path_selector import choose_path
+import numpy as np
+
+# Define path scores (lower is better)
+scores = np.array([0.8, 0.3, 0.5, 0.9])
+
+# Get quantum-selected path index
+selected_index = choose_path(scores, rep=1)
+print(f"Selected path: {selected_index}")
+```
+
+---
+
+## 📊 Dataset
+
+The project uses real data from 25 locations in Benasque Valley, Spain:
+
+| Data File | Description | Records |
+|-----------|-------------|---------|
+| `places.csv` | Location names (Pico Aneto, Cerler, etc.) | 25 |
+| `coordinates.csv` | GPS coordinates (lat, lon, alt) | 25 |
+| `distances.csv` | Travel time matrix (hours:minutes) | 25×25 |
+| `elevations.csv` | Elevation in meters | 25 |
+| `node_types.csv` | Categories (Peak, Town, Lake, etc.) | 25 |
+| `terrain.csv` | Winter/summer difficulty ratings | 25 |
+
+---
+
+## 👥 Team
+
+This project was developed during the **NTQC 2026 Spring School Hackathon** in Benasque, Spain by:
+
+- Aran Oliveras (@Spartoons)
+- Marcos Arroyo (@MArroyoSanchez)
+- Anna Ekstrøm (@AnnaEkstroem)
+- Annika Weisberg (@Annika-ee)
+
+---
+
+## 🙏 Acknowledgments
+
+Thanks to the organizers of the NTQC 2026 Spring School and the Benasque Center for Science for hosting the event.
+
+---
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🔗 Links
+
+- 📊 **Hackathon Info**: [NTQC 2026](https://www.icfo.eu/ntqc/)
+- ⚛️ **Qiskit**: [https://qiskit.org](https://qiskit.org)
+- 🗺️ **Benasque Valley**: [Wikipedia](https://en.wikipedia.org/wiki/Benasque)
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ and ⚛️ in Benasque, Spain</sub>
+</p>
